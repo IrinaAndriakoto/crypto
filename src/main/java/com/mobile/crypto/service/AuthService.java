@@ -27,9 +27,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Date;
 
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.authentication.LockedException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.authentication.BadCredentialsException;
+
 import java.security.SecureRandom;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collections;
+
 
 @Service
 @RequiredArgsConstructor
@@ -40,6 +47,8 @@ public class AuthService {
     private final JavaMailSender mailSender;
     private final UserDetailsService userDetailsService;
     private final JwtUtil jw;
+
+    private final int maxAttempts = 3;
 
 
     @Transactional
@@ -57,9 +66,12 @@ public class AuthService {
         // Générer un token de validation unique
         String verificationToken = UUID.randomUUID().toString();
         user.setVerificationToken(verificationToken);
+        System.out.println("Token avant sauvegarde : " + user.getVerificationToken());
 
         userRepository.save(user);
 
+        User savedUser = userRepository.findByEmail(request.getEmail()).orElse(null);
+    System.out.println("Token après sauvegarde : " + (savedUser != null ? savedUser.getVerificationToken() : "null"));
         // Envoi de l'email d'activation
         sendVerificationEmail(user.getEmail(), verificationToken);
     }
@@ -87,72 +99,57 @@ public class AuthService {
 
     public String login(LoginRequest request) {
         User user = userRepository.findByEmail(request.getEmail())
-            .orElseThrow(() -> new RuntimeException("Email ou mot de passe incorrect"));
-    
+            .orElseThrow(() -> new UsernameNotFoundException("Utilisateur introuvable"));
+
+        if (user.isAccountLocked()) {
+            throw new LockedException("Compte bloqué, veuillez réinitialiser votre tentative");        }
+
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new RuntimeException("Email ou mot de passe incorrect");
-        }
-    
+            user.setLoginAttempts(user.getLoginAttempts() + 1);
+            if (user.getLoginAttempts() >= maxAttempts) {
+                user.setAccountLocked(true);
+                sendUnlockEmail(user);
+                throw new LockedException("Compte verrouillé");
+            }
+            userRepository.save(user);
+            throw new RuntimeException("Email ou mot de passe incorrect");        }
+
+        // 🔄 Réinitialisation du compteur après une connexion réussie
         String pin = String.format("%06d", new SecureRandom().nextInt(1000000));
+        
         user.setPin(pin);
+        user.setLoginAttempts(0);
+        user.setAccountLocked(false);
 
         // Définir la date d'expiration (maintenant + 90 secondes)
         user.setPinExpiration(new Date(System.currentTimeMillis() + (90 * 1000)));
 
         userRepository.save(user);
-    
-        // Envoyer le PIN par email
         sendPinEmail(user.getEmail(), pin);
-    
-        return "PIN envoyé par email";
+
+        return "PIN envoyé";
+
+        // UserDetails userDetails = new org.springframework.security.core.userdetails.User(
+        //     user.getEmail(),
+        //     user.getPassword(),
+        //     user.isEnabled(),
+        //     true,  // account non-expired
+        //     true,  // credentials non-expired
+        //     !user.isAccountLocked(),  // account non-locked
+        //     Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
+        // );
+        
+        // return jw.generateToken(userDetails);
     }
     
-
-    // public String verifyPin(PinRequest request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
-    //     User user = userRepository.findByEmail(request.getEmail())
-    //         .orElseThrow(() -> new RuntimeException("Utilisateur introuvable"));
-    
-    //     if (!user.isEnabled()) {
-    //         throw new RuntimeException("Le compte n'est pas activé");
-    //     }
-    
-    //     System.out.println("PIN enregistré en base : " + user.getPin());
-    //     System.out.println("PIN reçu : " + request.getPin());
-    
-    //     // 🔄 Vérifier l'expiration du PIN
-    //     if (user.getPinExpiration() == null || user.getPinExpiration().before(new Date())) {
-    //         throw new RuntimeException("PIN expiré. Veuillez vous reconnecter.");
-    //     }
-    
-    //     if (!user.getPin().equals(request.getPin())) {
-    //         throw new RuntimeException("PIN invalide");
-    //     }
-    
-    //     // ✅ Authentification dans Spring Security
-    //     UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
-    //     UsernamePasswordAuthenticationToken authenticationToken =
-    //             new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-    
-    //     SecurityContext context = SecurityContextHolder.createEmptyContext();
-    //     context.setAuthentication(authenticationToken);
-    //     SecurityContextHolder.setContext(context);
-    
-    //     // 🔐 Persister l'authentification dans la session pour les requêtes suivantes
-    //     SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
-    //     securityContextRepository.saveContext(context, httpRequest, httpResponse);
-    
-    //     // 🔥 Générer le JWT
-    //     String token = jw.generateToken(userDetails);
-    //     System.out.println("JWT généré : " + token);
-    
-    //     // 🔄 Supprimer le PIN après validation
-    //     user.setPin(null);
-    //     user.setPinExpiration(null);
-    //     userRepository.save(user);
-            
-    //     return token;
-    // }
-    
+    private void sendUnlockEmail(User user) {
+        String resetUrl = "http://localhost:8088/api/auth/reset-attempts?email=" + user.getEmail();
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(user.getEmail());
+        message.setSubject("Réinitialisation des tentatives de connexion");
+        message.setText("Votre compte est verrouillé. Cliquez ici pour le déverrouiller : " + resetUrl);
+        mailSender.send(message);
+    }
 
     
 

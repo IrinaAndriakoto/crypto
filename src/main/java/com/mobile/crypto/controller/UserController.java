@@ -13,7 +13,9 @@ import com.mobile.crypto.config.JwtUtil;
 import com.mobile.crypto.entity.*;
 import com.mobile.crypto.repository.UserRepository;
 import com.mobile.crypto.service.*;
+import com.mobile.crypto.dto.UpdateUserRequest;
 
+import java.security.Principal;
 
 @RestController
 @RequestMapping("/api/user")
@@ -51,5 +53,10 @@ public class UserController {
         }
     }
 
+    @PutMapping("/update")
+    public ResponseEntity<?> updateUser(@RequestBody UpdateUserRequest request, Principal principal) {
+        userService.updateUser(principal.getName(), request);
+        return ResponseEntity.ok("Informations mises à jour avec succès.");
+    }
    
 }

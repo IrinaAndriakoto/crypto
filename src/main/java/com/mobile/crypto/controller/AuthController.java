@@ -34,10 +34,16 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 
 import jakarta.validation.Valid;
 
-@CrossOrigin(origins = "*", allowedHeaders = "*", exposedHeaders = "Authorization")
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+
+
+@CrossOrigin(origins = "http://localhost:5173")
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Tag(name = "Authentication", description = "Endpoints pour la gestion de l'authentification")
 public class AuthController {
 
     private final AuthService authService;
@@ -46,6 +52,9 @@ public class AuthController {
     private final UserDetailsService userDetailsService;
 
     @PostMapping("/signup")
+    @Operation(summary="Inscription des utilisateurs", description="Insere les nouveaux users dans la base")
+    @ApiResponse(responseCode = "200", description = "User inséré et mail envoyé en attente de confirmation")
+    @ApiResponse(responseCode = "400", description = "User déjà existant")
     public ResponseEntity<String> signup(@Valid @RequestBody SignupRequest request) {
         authService.registerUser(request);
         return ResponseEntity.ok("Utilisateur enregistré. Vérifiez votre email pour activer votre compte.");
@@ -58,11 +67,17 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @Operation(summary="Login", description="Login")
+    @ApiResponse(responseCode = "200", description = "Code PIN envoyé en attente de confirmation")
+    @ApiResponse(responseCode = "400", description = "Compte verrouillé et/ou mot de passe incorrect")
     public ResponseEntity<String> login(@RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
     }
     
     @PostMapping("/verifypin")
+    @Operation(summary = "Vérifier le PIN", description = "Valide le PIN de l'utilisateur")
+    @ApiResponse(responseCode = "200", description = "PIN valide")
+    @ApiResponse(responseCode = "400", description = "PIN invalide ou expiré")
     public ResponseEntity<?> verifyPin(@RequestBody PinRequest request) {
         try {
             User user = userRepository.findByEmail(request.getEmail())
@@ -110,5 +125,17 @@ public class AuthController {
         String token = jwtUtil.generateToken(userDetails);
         System.out.println("Token généré : " + token);
         return token;
+    }
+
+    @GetMapping("/reset-attempts")
+    public ResponseEntity<String> resetAttempts(@RequestParam String email) {
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new RuntimeException("Utilisateur introuvable"));
+
+        user.setLoginAttempts(0);
+        user.setAccountLocked(false);
+        userRepository.save(user);
+
+        return ResponseEntity.ok("Votre compte a été déverrouillé.");
     }
 }

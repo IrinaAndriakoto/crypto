@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import com.mobile.crypto.entity.User;
 import com.mobile.crypto.repository.UserRepository;
+import com.mobile.crypto.dto.UpdateUserRequest;
 
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
@@ -31,13 +32,13 @@ public class UserService {
         return userrepo.findById(id).orElse(null);
     }
 
-    // public boolean isValidLogin(String nom, String password) {
-    //     User utilisateur = userrepo.findByNom(nom);
+    public void updateUser(String email, UpdateUserRequest request) {
+        User user = userrepo.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Utilisateur introuvable"));
 
-    //     return utilisateur != null && utilisateur.getPassword().equals(password);
-    // }
-    // public User createUtilisateur(User u) {
-    //     return userrepo.save(u);
-    // }
+        user.setFullName(request.getFullName());
+        user.setPhoneNumber(request.getPhoneNumber());
+        userrepo.save(user);
+    }
 }
 
